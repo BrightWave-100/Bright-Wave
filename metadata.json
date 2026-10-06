@@ -1,0 +1,6 @@
+{
+  "name": "Challenge Arena",
+  "description": "A global social decision-simulation game where every choice has deterministic consequences, AI-enhanced narrative, and competitive friend challenges.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

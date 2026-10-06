@@ -1,0 +1,346 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Public user profile data isolated from PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 60,
+          "minLength": 1
+        },
+        "AnonymousPlayerId": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "AnonymousPlayerId", "createdAt", "updatedAt"]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Isolated PII subcollection document for a user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254,
+          "minLength": 3
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "updatedAt"]
+    },
+    "SavedResult": {
+      "title": "SavedResult",
+      "description": "User-saved simulation result linked to a verified Google account.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sessionId": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "challengeId": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "challengeTitle": {
+          "type": "string",
+          "maxLength": 120,
+          "minLength": 1
+        },
+        "score": {
+          "type": "integer"
+        },
+        "archetype": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "shareToken": {
+          "type": "string",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "sessionId", "ownerUid", "challengeId", "challengeTitle", "score", "archetype", "shareToken", "createdAt"]
+    },
+    "ServerConfig": {
+      "title": "ServerConfig",
+      "description": "Server-only master cryptographic hash configuration.",
+      "type": "object",
+      "properties": {
+        "secretHash": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": ["secretHash", "createdAt"]
+    },
+    "ServerCommit": {
+      "title": "ServerCommit",
+      "description": "Atomic server transaction commit proof.",
+      "type": "object",
+      "properties": {
+        "commitId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "secretHash": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128
+        },
+        "updatedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": ["commitId", "secretHash", "updatedAt"]
+    },
+    "ArenaPlayer": {
+      "title": "ArenaPlayer",
+      "description": "Authoritative binding between playerId and server-issued anonymous credential.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerAnonUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "activeSessions": {
+          "type": "object"
+        },
+        "resultIds": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": ["playerId", "ownerAnonUid", "displayName", "updatedAt"]
+    },
+    "ArenaSession": {
+      "title": "ArenaSession",
+      "description": "Authoritative server gameplay session stored in Cloud Firestore.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerAnonUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "challengeVersion": { "type": "integer" },
+        "isDaily": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "currentDecisionIndex": { "type": "integer" },
+        "startedAt": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "updatedAt": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["id", "playerId", "ownerAnonUid", "playerName", "challengeId", "challengeVersion", "isDaily", "status", "currentDecisionIndex", "startedAt", "updatedAt"]
+    },
+    "ArenaResult": {
+      "title": "ArenaResult",
+      "description": "Authoritative completed simulation result stored in Cloud Firestore.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerAnonUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "score": { "type": "integer" },
+        "archetype": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "shareToken": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "completedAt": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["id", "sessionId", "playerId", "ownerAnonUid", "playerName", "challengeId", "score", "archetype", "shareToken", "completedAt"]
+    },
+    "FriendChallenge": {
+      "title": "FriendChallenge",
+      "description": "Public friend challenge invitation and attempt counters (contains only public challenge comparison fields).",
+      "type": "object",
+      "properties": {
+        "shareToken": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "challengeTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "challengeCategory": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "challengeDescription": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "challengerName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "score": { "type": "integer" },
+        "tier": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "archetype": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "attemptsCount": { "type": "integer" },
+        "beatenCount": { "type": "integer" },
+        "createdAt": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "updatedAt": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["shareToken", "challengeId", "challengeTitle", "challengeCategory", "challengeDescription", "challengerName", "score", "tier", "archetype", "attemptsCount", "beatenCount", "createdAt", "updatedAt"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public leaderboard entry containing only intentionally public standings information.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "challengeTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "score": { "type": "integer" },
+        "archetype": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "tier": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "shareToken": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "isDaily": { "type": "boolean" },
+        "completedAt": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["id", "challengeId", "challengeTitle", "displayName", "score", "archetype", "tier", "isDaily", "completedAt"]
+    },
+    "DailyStat": {
+      "title": "DailyStat",
+      "description": "Authoritative daily challenge aggregate statistics.",
+      "type": "object",
+      "properties": {
+        "dateKey": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "challengeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "totalRuns": { "type": "integer" },
+        "sumScore": { "type": "integer" },
+        "topScore": { "type": "integer" },
+        "updatedAt": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["dateKey", "challengeId", "totalRuns", "sumScore", "topScore", "updatedAt"]
+    },
+    "ArenaAnalytics": {
+      "title": "ArenaAnalytics",
+      "description": "Authoritative server analytics event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "eventType": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["id", "eventType", "playerId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "Public user profile."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Isolated user PII subcollection."
+    },
+    "/results/{resultId}": {
+      "schema": { "$ref": "#/entities/SavedResult" },
+      "description": "User-saved results cloud vault."
+    },
+    "/serverConfig/{configId}": {
+      "schema": { "$ref": "#/entities/ServerConfig" },
+      "description": "Server-only master cryptographic configuration."
+    },
+    "/serverCommits/{commitId}": {
+      "schema": { "$ref": "#/entities/ServerCommit" },
+      "description": "Atomic server transaction commit proofs."
+    },
+    "/arenaPlayers/{docKey}": {
+      "schema": { "$ref": "#/entities/ArenaPlayer" },
+      "description": "Private authoritative anonymous player ownership records."
+    },
+    "/arenaSessions/{docKey}": {
+      "schema": { "$ref": "#/entities/ArenaSession" },
+      "description": "Private authoritative gameplay sessions."
+    },
+    "/arenaResults/{docKey}": {
+      "schema": { "$ref": "#/entities/ArenaResult" },
+      "description": "Private authoritative completed simulation results."
+    },
+    "/friendChallenges/{shareToken}": {
+      "schema": { "$ref": "#/entities/FriendChallenge" },
+      "description": "Public friend challenge invitations and counters."
+    },
+    "/leaderboards/{entryId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public leaderboard standings."
+    },
+    "/dailyStats/{dateKey}": {
+      "schema": { "$ref": "#/entities/DailyStat" },
+      "description": "Public aggregate daily challenge statistics."
+    },
+    "/analytics/{eventId}": {
+      "schema": { "$ref": "#/entities/ArenaAnalytics" },
+      "description": "Server-only analytics events."
+    }
+  }
+}

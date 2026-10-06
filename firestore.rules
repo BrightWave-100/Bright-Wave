@@ -1,0 +1,470 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Server-HMAC capability key format for private authoritative documents (128-bit MAC prefix)
+    // Browser clients only know logical IDs (plr_*, sess_*, res_*), never the server capability key.
+    function isServerKeyedId(docKey) {
+      return docKey is string &&
+        docKey.size() >= 38 &&
+        docKey.size() <= 128 &&
+        docKey.matches('^srv_[a-f0-9]{32}_[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    // Atomic Non-Replayable Server Authority Proof Gate
+    // Requires serverCommits/{commitId} to be created or modified in the SAME atomic batch/transaction
+    // with a fresh unique updatedAt stamp AND match the unreadable serverConfig/master secretHash.
+    function isAuthorizedServerCommit(commitId) {
+      return (!exists(/databases/$(database)/documents/serverCommits/$(commitId)) ||
+        getAfter(/databases/$(database)/documents/serverCommits/$(commitId)).data.updatedAt !=
+        get(/databases/$(database)/documents/serverCommits/$(commitId)).data.updatedAt) &&
+        getAfter(/databases/$(database)/documents/serverCommits/$(commitId)).data.secretHash ==
+        get(/databases/$(database)/documents/serverConfig/master).data.secretHash;
+    }
+
+    // 3. Entity Validation Helpers
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'AnonymousPlayerId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'AnonymousPlayerId', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == request.auth.uid &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.AnonymousPlayerId is string && data.AnonymousPlayerId.size() >= 1 && data.AnonymousPlayerId.size() <= 128 && data.AnonymousPlayerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['uid', 'email', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == request.auth.uid &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 254 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSavedResult(data) {
+      return data.keys().hasAll(['id', 'sessionId', 'ownerUid', 'challengeId', 'challengeTitle', 'score', 'archetype', 'shareToken', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'sessionId', 'ownerUid', 'challengeId', 'challengeTitle', 'score', 'archetype', 'shareToken', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 && data.sessionId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 && data.ownerUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerUid == request.auth.uid &&
+        data.challengeId is string && data.challengeId.size() >= 1 && data.challengeId.size() <= 128 && data.challengeId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.challengeTitle is string && data.challengeTitle.size() >= 1 && data.challengeTitle.size() <= 120 &&
+        data.score is int && data.score >= 0 && data.score <= 100 &&
+        data.archetype is string && data.archetype.size() >= 1 && data.archetype.size() <= 80 &&
+        data.shareToken is string && data.shareToken.size() >= 1 && data.shareToken.size() <= 128 && data.shareToken.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAnalyticsEvent(data) {
+      return data.keys().hasAll(['id', 'ownerUid', 'eventType', 'challengeId', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'ownerUid', 'eventType', 'challengeId', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 && data.ownerUid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerUid == request.auth.uid &&
+        data.eventType is string && data.eventType.size() >= 1 && data.eventType.size() <= 64 &&
+        data.challengeId is string && data.challengeId.size() >= 1 && data.challengeId.size() <= 128 && data.challengeId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidServerCommit(data) {
+      return data.keys().hasAll(['commitId', 'secretHash', 'updatedAt']) &&
+        data.keys().hasOnly(['commitId', 'secretHash', 'updatedAt']) &&
+        isValidId(data.commitId) &&
+        data.secretHash is string && data.secretHash.size() >= 32 && data.secretHash.size() <= 128 &&
+        data.updatedAt is string && data.updatedAt.size() >= 1 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidArenaPlayer(data) {
+      return data.keys().hasAll(['playerId', 'ownerAnonUid', 'displayName', 'updatedAt']) &&
+        data.keys().hasOnly(['playerId', 'ownerAnonUid', 'displayName', 'activeSessions', 'resultIds', 'updatedAt']) &&
+        isValidId(data.playerId) &&
+        isValidId(data.ownerAnonUid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        (!('activeSessions' in data) || data.activeSessions is map) &&
+        (!('resultIds' in data) || (data.resultIds is list && data.resultIds.size() <= 100 && (data.resultIds.size() == 0 || (data.resultIds[0] is string && data.resultIds[0].size() <= 128)))) &&
+        data.updatedAt is string && data.updatedAt.size() >= 1 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidArenaSession(data) {
+      return data.keys().hasAll(['id', 'playerId', 'ownerAnonUid', 'playerName', 'challengeId', 'challengeVersion', 'isDaily', 'status', 'currentDecisionIndex', 'state', 'dimensionScores', 'decisionHistory', 'startedAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'playerId', 'ownerAnonUid', 'playerName', 'challengeId', 'challengeVersion', 'isDaily', 'dailyDateKey', 'friendShareToken', 'status', 'currentDecisionIndex', 'state', 'dimensionScores', 'decisionHistory', 'resultId', 'startedAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.playerId) &&
+        isValidId(data.ownerAnonUid) &&
+        data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 60 &&
+        isValidId(data.challengeId) &&
+        data.challengeVersion is int && data.challengeVersion >= 1 &&
+        data.isDaily is bool &&
+        (!('dailyDateKey' in data) || isValidId(data.dailyDateKey)) &&
+        (!('friendShareToken' in data) || isValidId(data.friendShareToken)) &&
+        (!('resultId' in data) || isValidId(data.resultId)) &&
+        data.status in ['active', 'completed'] &&
+        data.currentDecisionIndex is int && data.currentDecisionIndex >= 0 && data.currentDecisionIndex <= 20 &&
+        data.state is map &&
+        data.dimensionScores is map &&
+        data.decisionHistory is list && data.decisionHistory.size() <= 20 && (data.decisionHistory.size() == 0 || data.decisionHistory[0] is map) &&
+        data.startedAt is string && data.startedAt.size() >= 1 && data.startedAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() >= 1 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidArenaResult(data) {
+      return data.keys().hasAll(['id', 'sessionId', 'playerId', 'ownerAnonUid', 'playerName', 'challengeId', 'challengeSlug', 'challengeTitle', 'challengeCategory', 'challengeVersion', 'isDaily', 'score', 'tier', 'tierLabel', 'archetype', 'archetypeDescription', 'summaryCommentary', 'dimensions', 'finalState', 'stateMetrics', 'decisionHistory', 'shareToken', 'completedAt']) &&
+        data.keys().hasOnly(['id', 'sessionId', 'playerId', 'ownerAnonUid', 'playerName', 'challengeId', 'challengeSlug', 'challengeTitle', 'challengeCategory', 'challengeVersion', 'isDaily', 'dailyDateKey', 'score', 'tier', 'tierLabel', 'archetype', 'archetypeDescription', 'summaryCommentary', 'dimensions', 'finalState', 'stateMetrics', 'decisionHistory', 'shareToken', 'friendTargetBeaten', 'completedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.sessionId) &&
+        isValidId(data.playerId) &&
+        isValidId(data.ownerAnonUid) &&
+        data.playerName is string && data.playerName.size() >= 1 && data.playerName.size() <= 60 &&
+        isValidId(data.challengeId) &&
+        data.challengeSlug is string && data.challengeSlug.size() >= 1 && data.challengeSlug.size() <= 120 &&
+        data.challengeTitle is string && data.challengeTitle.size() >= 1 && data.challengeTitle.size() <= 120 &&
+        data.challengeCategory is string && data.challengeCategory.size() >= 1 && data.challengeCategory.size() <= 80 &&
+        data.challengeVersion is int && data.challengeVersion >= 1 &&
+        data.isDaily is bool &&
+        (!('dailyDateKey' in data) || isValidId(data.dailyDateKey)) &&
+        (!('friendTargetBeaten' in data) || data.friendTargetBeaten is map) &&
+        data.score is int && data.score >= 0 && data.score <= 100 &&
+        data.tier is string && data.tier.size() >= 1 && data.tier.size() <= 40 &&
+        data.tierLabel is string && data.tierLabel.size() >= 1 && data.tierLabel.size() <= 80 &&
+        data.archetype is string && data.archetype.size() >= 1 && data.archetype.size() <= 80 &&
+        data.archetypeDescription is string && data.archetypeDescription.size() >= 1 && data.archetypeDescription.size() <= 400 &&
+        data.summaryCommentary is string && data.summaryCommentary.size() >= 1 && data.summaryCommentary.size() <= 500 &&
+        data.dimensions is list && data.dimensions.size() <= 10 && (data.dimensions.size() == 0 || data.dimensions[0] is map) &&
+        data.finalState is map &&
+        data.stateMetrics is list && data.stateMetrics.size() <= 15 && (data.stateMetrics.size() == 0 || data.stateMetrics[0] is map) &&
+        data.decisionHistory is list && data.decisionHistory.size() <= 20 && (data.decisionHistory.size() == 0 || data.decisionHistory[0] is map) &&
+        isValidId(data.shareToken) &&
+        data.completedAt is string && data.completedAt.size() >= 1 && data.completedAt.size() <= 64;
+    }
+
+    function isValidFriendChallenge(data) {
+      return data.keys().hasAll(['shareToken', 'challengeId', 'challengeTitle', 'challengeCategory', 'challengeDescription', 'challengerName', 'score', 'tier', 'archetype', 'dimensions', 'createdAt', 'updatedAt', 'attemptsCount', 'beatenCount']) &&
+        data.keys().hasOnly(['shareToken', 'challengeId', 'challengeTitle', 'challengeCategory', 'challengeDescription', 'challengerName', 'score', 'tier', 'archetype', 'dimensions', 'createdAt', 'updatedAt', 'attemptsCount', 'beatenCount']) &&
+        isValidId(data.shareToken) &&
+        isValidId(data.challengeId) &&
+        data.challengeTitle is string && data.challengeTitle.size() >= 1 && data.challengeTitle.size() <= 120 &&
+        data.challengeCategory is string && data.challengeCategory.size() >= 1 && data.challengeCategory.size() <= 80 &&
+        data.challengeDescription is string && data.challengeDescription.size() >= 1 && data.challengeDescription.size() <= 500 &&
+        data.challengerName is string && data.challengerName.size() >= 1 && data.challengerName.size() <= 60 &&
+        data.score is int && data.score >= 0 && data.score <= 100 &&
+        data.tier is string && data.tier.size() >= 1 && data.tier.size() <= 40 &&
+        data.archetype is string && data.archetype.size() >= 1 && data.archetype.size() <= 80 &&
+        data.dimensions is list && data.dimensions.size() <= 10 && (data.dimensions.size() == 0 || data.dimensions[0] is map) &&
+        data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() >= 1 && data.updatedAt.size() <= 64 &&
+        data.attemptsCount is int && data.attemptsCount >= 0 &&
+        data.beatenCount is int && data.beatenCount >= 0;
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return data.keys().hasAll(['id', 'challengeId', 'challengeTitle', 'displayName', 'score', 'archetype', 'tier', 'isDaily', 'completedAt']) &&
+        data.keys().hasOnly(['id', 'challengeId', 'challengeTitle', 'displayName', 'score', 'archetype', 'tier', 'shareToken', 'isDaily', 'dailyDateKey', 'completedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.challengeId) &&
+        data.challengeTitle is string && data.challengeTitle.size() >= 1 && data.challengeTitle.size() <= 120 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.score is int && data.score >= 0 && data.score <= 100 &&
+        data.archetype is string && data.archetype.size() >= 1 && data.archetype.size() <= 80 &&
+        data.tier is string && data.tier.size() >= 1 && data.tier.size() <= 40 &&
+        (!('shareToken' in data) || isValidId(data.shareToken)) &&
+        data.isDaily is bool &&
+        (!('dailyDateKey' in data) || isValidId(data.dailyDateKey)) &&
+        data.completedAt is string && data.completedAt.size() >= 1 && data.completedAt.size() <= 64;
+    }
+
+    function isValidDailyStat(data) {
+      return data.keys().hasAll(['dateKey', 'challengeId', 'totalRuns', 'sumScore', 'topScore', 'updatedAt']) &&
+        data.keys().hasOnly(['dateKey', 'challengeId', 'totalRuns', 'sumScore', 'topScore', 'updatedAt']) &&
+        isValidId(data.dateKey) &&
+        isValidId(data.challengeId) &&
+        data.totalRuns is int && data.totalRuns >= 0 &&
+        data.sumScore is int && data.sumScore >= 0 &&
+        data.topScore is int && data.topScore >= 0 && data.topScore <= 100 &&
+        data.updatedAt is string && data.updatedAt.size() >= 1 && data.updatedAt.size() <= 64;
+    }
+
+    function isValidServerAnalytics(data) {
+      return data.keys().hasAll(['id', 'eventType', 'playerId', 'timestamp']) &&
+        data.keys().hasOnly(['id', 'eventType', 'playerId', 'challengeId', 'sessionId', 'shareToken', 'metadata', 'timestamp']) &&
+        isValidId(data.id) &&
+        data.eventType is string && data.eventType.size() >= 1 && data.eventType.size() <= 64 &&
+        isValidId(data.playerId) &&
+        (!('challengeId' in data) || isValidId(data.challengeId)) &&
+        (!('sessionId' in data) || isValidId(data.sessionId)) &&
+        (!('shareToken' in data) || isValidId(data.shareToken)) &&
+        (!('metadata' in data) || data.metadata is map) &&
+        data.timestamp is string && data.timestamp.size() >= 1 && data.timestamp.size() <= 64;
+    }
+
+    // 4. Collection Rules
+
+    // Public User Profile (Owner-Only Access; AnonymousPlayerId is immutable once bound)
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserPublic(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserPublic(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().AnonymousPlayerId == existing().AnonymousPlayerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']);
+      allow delete: if false;
+
+      // Isolated PII Subcollection (Master Gate enforced)
+      match /private/{docId} {
+        allow get: if isOwner(userId) &&
+          isValidId(userId) &&
+          docId == 'info' &&
+          exists(/databases/$(database)/documents/users/$(userId));
+        allow list: if false;
+        allow create: if isOwner(userId) &&
+          isValidId(userId) &&
+          docId == 'info' &&
+          isValidUserPrivate(incoming()) &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId));
+        allow update: if isOwner(userId) &&
+          isValidId(userId) &&
+          docId == 'info' &&
+          isValidUserPrivate(incoming()) &&
+          incoming().uid == existing().uid &&
+          incoming().updatedAt == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']) &&
+          exists(/databases/$(database)/documents/users/$(userId));
+        allow delete: if false;
+      }
+    }
+
+    // Server Cryptographic Authority Root (Locked: Never Readable or Writable by Clients)
+    match /serverConfig/{configId} {
+      allow read, write: if false;
+    }
+
+    // Server Atomic Commit Proofs (Never Readable by Clients; Requires Master Secret Hash)
+    match /serverCommits/{commitId} {
+      allow read: if false;
+      allow create: if isValidId(commitId) &&
+        isValidServerCommit(incoming()) &&
+        incoming().commitId == commitId &&
+        incoming().secretHash == get(/databases/$(database)/documents/serverConfig/master).data.secretHash;
+      allow update: if isValidId(commitId) &&
+        isValidServerCommit(incoming()) &&
+        incoming().commitId == existing().commitId &&
+        incoming().updatedAt != existing().updatedAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['secretHash', 'updatedAt']) &&
+        incoming().secretHash == get(/databases/$(database)/documents/serverConfig/master).data.secretHash;
+      allow delete: if false;
+    }
+
+    // Private Authoritative Player Ownership Records (Server-Keyed Capability Path Only)
+    match /arenaPlayers/{docKey} {
+      allow get: if isServerKeyedId(docKey);
+      allow list: if false;
+      allow create: if isServerKeyedId(docKey) &&
+        isValidArenaPlayer(incoming()) &&
+        isAuthorizedServerCommit(docKey);
+      allow update: if isServerKeyedId(docKey) &&
+        isValidArenaPlayer(incoming()) &&
+        incoming().playerId == existing().playerId &&
+        incoming().ownerAnonUid == existing().ownerAnonUid &&
+        isAuthorizedServerCommit(docKey);
+      allow delete: if false;
+    }
+
+    // Private Authoritative Gameplay Sessions (Server-Keyed Capability Path Only)
+    match /arenaSessions/{docKey} {
+      allow get: if isServerKeyedId(docKey);
+      allow list: if false;
+      allow create: if isServerKeyedId(docKey) &&
+        isValidArenaSession(incoming()) &&
+        isAuthorizedServerCommit(docKey);
+      allow update: if isServerKeyedId(docKey) &&
+        isValidArenaSession(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().playerId == existing().playerId &&
+        incoming().ownerAnonUid == existing().ownerAnonUid &&
+        incoming().challengeId == existing().challengeId &&
+        incoming().startedAt == existing().startedAt &&
+        isAuthorizedServerCommit(docKey);
+      allow delete: if false;
+    }
+
+    // Private Authoritative Completed Simulation Results (Server-Keyed Capability Path Only; No Public List)
+    match /arenaResults/{docKey} {
+      allow get: if isServerKeyedId(docKey);
+      allow list: if false;
+      allow create: if isServerKeyedId(docKey) &&
+        isValidArenaResult(incoming()) &&
+        isAuthorizedServerCommit(docKey);
+      allow update: if isServerKeyedId(docKey) &&
+        isValidArenaResult(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().sessionId == existing().sessionId &&
+        incoming().playerId == existing().playerId &&
+        incoming().ownerAnonUid == existing().ownerAnonUid &&
+        incoming().challengeId == existing().challengeId &&
+        incoming().score == existing().score &&
+        incoming().shareToken == existing().shareToken &&
+        incoming().completedAt == existing().completedAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['playerName']) &&
+        isAuthorizedServerCommit(docKey);
+      allow delete: if false;
+    }
+
+    // Public Friend Challenge Invites (Accessible by ShareToken Only; Server-Only Writes)
+    match /friendChallenges/{shareToken} {
+      allow get: if isValidId(shareToken);
+      allow list: if false;
+      allow create: if isValidId(shareToken) &&
+        isValidFriendChallenge(incoming()) &&
+        incoming().shareToken == shareToken &&
+        isAuthorizedServerCommit(shareToken);
+      allow update: if isValidId(shareToken) &&
+        isValidFriendChallenge(incoming()) &&
+        incoming().shareToken == existing().shareToken &&
+        incoming().challengeId == existing().challengeId &&
+        incoming().score == existing().score &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().attemptsCount >= existing().attemptsCount &&
+        incoming().beatenCount >= existing().beatenCount &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['challengerName', 'attemptsCount', 'beatenCount', 'updatedAt']) &&
+        isAuthorizedServerCommit(shareToken);
+      allow delete: if false;
+    }
+
+    // Public Leaderboards (Contains Only Intentionally Public Standings Fields; Server-Only Writes)
+    match /leaderboards/{entryId} {
+      allow get: if isValidId(entryId);
+      allow list: if existing().score >= 0 && existing().score <= 100;
+      allow create: if isValidId(entryId) &&
+        isValidLeaderboardEntry(incoming()) &&
+        incoming().id == entryId &&
+        isAuthorizedServerCommit(entryId);
+      allow update: if isValidId(entryId) &&
+        isValidLeaderboardEntry(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().challengeId == existing().challengeId &&
+        incoming().score >= existing().score &&
+        isAuthorizedServerCommit(entryId);
+      allow delete: if false;
+    }
+
+    // Public Aggregate Daily Challenge Statistics (Contains Only Aggregate Counts/Scores; Server-Only Writes)
+    match /dailyStats/{dateKey} {
+      allow get: if isValidId(dateKey);
+      allow list: if false;
+      allow create: if isValidId(dateKey) &&
+        isValidDailyStat(incoming()) &&
+        incoming().dateKey == dateKey &&
+        isAuthorizedServerCommit(dateKey);
+      allow update: if isValidId(dateKey) &&
+        isValidDailyStat(incoming()) &&
+        incoming().dateKey == existing().dateKey &&
+        incoming().challengeId == existing().challengeId &&
+        incoming().totalRuns >= existing().totalRuns &&
+        incoming().sumScore >= existing().sumScore &&
+        incoming().topScore >= existing().topScore &&
+        isAuthorizedServerCommit(dateKey);
+      allow delete: if false;
+    }
+
+    // Server-Only Analytics Events (Never Readable by Clients; Server-Only Writes)
+    match /analytics/{eventId} {
+      allow read: if false;
+      allow create: if isValidId(eventId) &&
+        isValidServerAnalytics(incoming()) &&
+        incoming().id == eventId &&
+        isAuthorizedServerCommit(eventId);
+      allow update, delete: if false;
+    }
+
+    // Legacy / Static Collections (Direct Client Writes Strictly Forbidden)
+    match /challenges/{challengeId} {
+      allow get: if isValidId(challengeId) && existing().published == true;
+      allow list: if existing().published == true;
+      allow write: if false;
+    }
+
+    match /challengeSessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /dailyChallenges/{dateKey} {
+      allow get: if isValidId(dateKey);
+      allow list: if false;
+      allow write: if false;
+    }
+
+    // User Saved Results Vault (Immutable once created; requires existing User profile)
+    match /results/{resultId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(resultId) &&
+        existing().ownerUid == request.auth.uid;
+      allow list: if isVerifiedUser() &&
+        existing().ownerUid == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(resultId) &&
+        isValidSavedResult(incoming()) &&
+        incoming().id == resultId &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update, delete: if false;
+    }
+
+    // User Analytics Events (Append-only; requires existing User profile)
+    match /analyticsEvents/{eventId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        existing().ownerUid == request.auth.uid;
+      allow list: if isVerifiedUser() &&
+        existing().ownerUid == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(eventId) &&
+        isValidAnalyticsEvent(incoming()) &&
+        incoming().id == eventId &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update, delete: if false;
+    }
+  }
+}
