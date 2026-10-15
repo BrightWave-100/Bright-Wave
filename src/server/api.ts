@@ -27,8 +27,21 @@ import {
 } from './auth.js';
 import { generateDecisionNarrative, sanitizePlainText } from './gemini.js';
 import { arenaStore, sanitizeFirestoreId } from './store.js';
+import { createRateLimiter } from './rate-limit.js';
 
 export const apiRouter = express.Router();
+
+const startSessionLimiter = createRateLimiter({
+  name: 'sessions-start',
+  windowMs: 60_000,
+  max: 30,
+});
+
+const analyticsLimiter = createRateLimiter({
+  name: 'analytics',
+  windowMs: 60_000,
+  max: 60,
+});
 
 // Attach server-issued HttpOnly anonymous credential & client IP to all API requests
 apiRouter.use(anonymousCredentialMiddleware);
@@ -164,6 +177,7 @@ const ALLOWED_DECIDE_KEYS = new Set([
 
 apiRouter.post(
   '/sessions/start',
+  startSessionLimiter,
   async (req: AuthenticatedArenaRequest, res: Response) => {
     try {
       const body = req.body && typeof req.body === 'object' ? req.body : {};
@@ -716,6 +730,7 @@ apiRouter.get(
 // POST /api/analytics
 apiRouter.post(
   '/analytics',
+  analyticsLimiter,
   async (req: AuthenticatedArenaRequest, res: Response) => {
     try {
       const {
