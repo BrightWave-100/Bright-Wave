@@ -74,12 +74,16 @@ export function parseCookies(cookieHeader: string | undefined): Record<string, s
 }
 
 export function extractClientIp(req: Request): string {
+  // The trusted proxy appends the connecting client's address to the END of
+  // x-forwarded-for. Entries before it are client-supplied and forgeable, so
+  // only the last entry is used. Assumes exactly one trusted proxy in front.
   const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim().length > 0) {
-    return forwarded.split(',')[0].trim();
-  }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return String(forwarded[0]).trim();
+  const raw = Array.isArray(forwarded) ? forwarded.join(',') : forwarded;
+  if (typeof raw === 'string' && raw.trim().length > 0) {
+    const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      return parts[parts.length - 1];
+    }
   }
   return req.ip || req.socket?.remoteAddress || '127.0.0.1';
 }
