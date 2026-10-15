@@ -1,0 +1,514 @@
+openapi: 3.0.3
+info:
+  title: Challenge Arena API
+  version: 0.1.0
+  description: |
+    REST API for Challenge Arena, a decision-simulation game. Generated from
+    `src/server/api.ts`. Session state and scores are computed server-side;
+    clients may only send the fields listed for each endpoint.
+
+    Ownership: the first API call sets a server-issued HttpOnly anonymous
+    credential cookie. Sessions and private results are bound to that
+    credential, and requests from another credential get 403.
+servers:
+  - url: https://bright-wave.vercel.app/api
+    description: Production (Vercel)
+tags:
+  - name: Challenges
+  - name: Sessions
+  - name: Results
+  - name: Players
+  - name: Friend challenges
+  - name: Leaderboards
+  - name: Analytics
+
+paths:
+  /challenges:
+    get:
+      tags: [Challenges]
+      operationId: listChallenges
+      summary: List published challenges
+      parameters:
+        - name: tag
+          in: query
+          schema: { type: string }
+          description: Filter by tag.
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Space-separated keywords; all must match.
+      responses:
+        '200':
+          description: Challenge summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenges:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChallengeSummary' }
+                  availableTags:
+                    type: array
+                    items: { type: string }
+                  recentResults:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /challenges/{id}:
+    get:
+      tags: [Challenges]
+      operationId: getChallenge
+      summary: Get a challenge and its top leaderboard entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Challenge ID or slug.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Challenge and up to 10 leaderboard entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challenge: { $ref: '#/components/schemas/ChallengeSummary' }
+                  leaderboard:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /daily:
+    get:
+      tags: [Challenges]
+      operationId: getDailyChallenge
+      summary: Get today's daily challenge (UTC date)
+      responses:
+        '200':
+          description: Daily challenge with stats and leaderboard.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dateKey: { type: string, example: '2026-10-15' }
+                  seed: { type: string }
+                  challenge: { $ref: '#/components/schemas/ChallengeSummary' }
+                  stats: { type: object, additionalProperties: true }
+                  leaderboard:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /sessions/start:
+    post:
+      tags: [Sessions]
+      operationId: startSession
+      summary: Start a session, or resume the active one
+      description: |
+        Resumes an active session for the same player and challenge unless
+        `forceNew` is true. Any field not listed in the request body is
+        rejected with `CLIENT_TAMPERING_REJECTED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeId, playerId]
+              properties:
+                challengeId: { type: string, description: Challenge ID or slug. }
+                playerId:
+                  type: string
+                  maxLength: 128
+                  pattern: '^[a-zA-Z0-9_-]+$'
+                playerName: { type: string, maxLength: 40 }
+                isDaily: { type: boolean }
+                friendShareToken: { type: string, maxLength: 64 }
+                forceNew: { type: boolean }
+      responses:
+        '200':
+          description: Existing active session resumed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { $ref: '#/components/schemas/Session' }
+                  resumed: { type: boolean, enum: [true] }
+        '201':
+          description: New session created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { $ref: '#/components/schemas/Session' }
+                  resumed: { type: boolean, enum: [false] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      operationId: getSession
+      summary: Get a session and its result, if finished
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+      responses:
+        '200':
+          description: Session and, if it is finished, its result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session: { $ref: '#/components/schemas/Session' }
+                  result: { $ref: '#/components/schemas/Result' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /sessions/{sessionId}/decide:
+    post:
+      tags: [Sessions]
+      operationId: submitDecision
+      summary: Submit a choice for the current decision
+      description: |
+        The server validates the choice against the current decision, then
+        applies state changes, scoring, and narrative. Client-supplied score,
+        state, or resource fields are rejected. Narrative text is generated
+        by Gemini when available and falls back to deterministic text when
+        rate limits apply or the model is unavailable.
+        The success response fields are not documented in this spec yet.
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeId, decisionIndex, decisionId, optionId]
+              properties:
+                challengeId: { type: string }
+                decisionIndex: { type: integer, minimum: 0 }
+                decisionId: { type: string }
+                optionId: { type: string }
+      responses:
+        '200':
+          description: Decision accepted; updated session returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid decision, out-of-order submission, or rejected client field.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties:
+                      session: { $ref: '#/components/schemas/Session' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /results/{resultId}:
+    get:
+      tags: [Results]
+      operationId: getResult
+      summary: Get a finished simulation result
+      parameters:
+        - name: resultId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: { $ref: '#/components/schemas/Result' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /player/{playerId}/results:
+    get:
+      tags: [Players]
+      operationId: getPlayerResults
+      summary: List a player's results
+      description: Claims an unclaimed player ID for the caller if none exists yet.
+      parameters:
+        - $ref: '#/components/parameters/PlayerId'
+      responses:
+        '200':
+          description: Player's results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/Result' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /player/profile:
+    post:
+      tags: [Players]
+      operationId: updatePlayerProfile
+      summary: Update a player's display name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playerId, displayName]
+              properties:
+                playerId: { type: string }
+                displayName: { type: string, maxLength: 40 }
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  playerId: { type: string }
+                  displayName: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /friend-challenges:
+    post:
+      tags: [Friend challenges]
+      operationId: createFriendChallenge
+      summary: Create a shareable invite from a result
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resultId]
+              properties:
+                resultId: { type: string }
+      responses:
+        '201':
+          description: Invite created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite: { $ref: '#/components/schemas/FriendChallengeInvite' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /friend-challenges/{shareToken}:
+    get:
+      tags: [Friend challenges]
+      operationId: getFriendChallenge
+      summary: Open a friend challenge by share token
+      description: Public. Anyone with the token can read the invite.
+      parameters:
+        - name: shareToken
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Invite and its challenge summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invite: { $ref: '#/components/schemas/FriendChallengeInvite' }
+                  challenge:
+                    nullable: true
+                    allOf:
+                      - $ref: '#/components/schemas/ChallengeSummary'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /leaderboards:
+    get:
+      tags: [Leaderboards]
+      operationId: getLeaderboard
+      summary: Get up to 50 leaderboard entries
+      parameters:
+        - name: challengeId
+          in: query
+          required: false
+          description: Omit or use `all` for the overall leaderboard.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Leaderboard entries.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /analytics:
+    post:
+      tags: [Analytics]
+      operationId: recordAnalyticsEvent
+      summary: Record an analytics event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventType]
+              properties:
+                eventType: { type: string, maxLength: 64 }
+                playerId: { type: string, maxLength: 128 }
+                challengeId: { type: string, maxLength: 64 }
+                sessionId: { type: string, maxLength: 64 }
+                shareToken: { type: string, maxLength: 64 }
+                metadata: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Event recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recorded: { type: boolean, enum: [true] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema: { type: string }
+    PlayerId:
+      name: playerId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Invalid or rejected request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: The anonymous credential does not own this resource.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: |
+        Too many requests. Limits apply per client IP and per anonymous
+        credential, per serverless instance. Present only after the
+        `security/rate-limit-endpoints` branch is merged.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        code:
+          type: string
+          description: Machine-readable code such as SESSION_OWNERSHIP_FORBIDDEN or CLIENT_TAMPERING_REJECTED.
+
+    ChallengeSummary:
+      type: object
+      description: Public challenge fields. Full shape is defined by the engine's toChallengeSummaryClient.
+      properties:
+        id: { type: string }
+        title: { type: string }
+        subtitle: { type: string }
+        description: { type: string }
+        category: { type: string }
+        difficulty: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+      additionalProperties: true
+
+    Session:
+      type: object
+      description: Client view of a simulation session. Defined by toSessionClient.
+      properties:
+        id: { type: string }
+        challengeId: { type: string }
+        playerId: { type: string }
+        playerName: { type: string }
+        status: { type: string }
+        currentDecisionIndex: { type: integer }
+      additionalProperties: true
+
+    Result:
+      type: object
+      description: Client view of a finished result. Owner metadata is stripped.
+      properties:
+        id: { type: string }
+        challengeId: { type: string }
+        playerId: { type: string }
+        score: { type: number }
+        shareToken: { type: string }
+      additionalProperties: true
+
+    FriendChallengeInvite:
+      type: object
+      properties:
+        shareToken: { type: string }
+        challengeId: { type: string }
+        resultId: { type: string }
+      additionalProperties: true
