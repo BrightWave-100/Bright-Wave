@@ -60,6 +60,15 @@ function consumeBucket(key: string, maxCalls: number): boolean {
   return true;
 }
 
+function pruneExpiredBuckets(now: number): void {
+  if (rateLimitBuckets.size < 1000) return;
+  for (const [key, bucket] of rateLimitBuckets) {
+    if (now - bucket.windowStart > RATE_LIMIT_WINDOW_MS) {
+      rateLimitBuckets.delete(key);
+    }
+  }
+}
+
 export function resetNarrativeRateLimits(): void {
   rateLimitBuckets.clear();
 }
@@ -75,6 +84,7 @@ export function checkNarrativeRateLimit(
 
   // Check all applicable buckets before incrementing so a rejected request on one layer does not unfairly drain another layer
   const now = Date.now();
+  pruneExpiredBuckets(now);
   const checks: Array<{ key: string; limit: number }> = [];
 
   if (clientIp) {
